@@ -1,5 +1,5 @@
 #!name=油价面板（可核对日期）
-#!desc=现价、下次调价窗口与第三方预测区间；正式价格以公告为准
+#!desc=现价、预计调价日期、各油号预计涨幅、预计调后价格；无法核实的项目显示待更新
 #!category=🌠 面板模块
 #!arguments=省份拼音:shandong
 #!arguments-desc=陕西填 shanxi-3；城市可填 shanxi-3/xian（城市原站仅 HTTP）
@@ -8,4 +8,4 @@
 QiYou = script-name=QiYou,update-interval=43200
 
 [Script]
-QiYou = type=generic,timeout=15,script-path=https://raw.githubusercontent.com/shuikezhang/qiyou-surge-panel/main/QiYou.js?v=20261028-compact-1,argument={{{省份拼音}}}
+QiYou = type=generic,timeout=15,script-path=https://raw.githubusercontent.com/shuikezhang/qiyou-surge-panel/main/QiYou.js?v=20261028-four-sections-1,argument={{{省份拼音}}}
