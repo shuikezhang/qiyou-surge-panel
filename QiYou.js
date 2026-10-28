@@ -33,8 +33,18 @@
       if (!validWindow(window,posted)) return done(null);
       var data={window:window[1]+'年'+window[2]+'月'+window[3]+'日24时',date:posted,ton:Number(forecast[4]),direction:forecast[3]};
       if (data.ton<50 || data.ton>1500) return done(null);
-      // 吨价预测没有各油号的元/升数据，不能据此推算分油号涨幅。
-      done(data);
+      // 升价采用同日媒体的汽柴油预测范围，不把标准品吨价直接换算成升价。
+      $httpClient.get({url:'https://m.sohu.com/a/1093928064_121455647',timeout:3000},function (err2,res2,html2) {
+        if (!err2 && res2 && Number(res2.status || res2.statusCode)===200 && html2) {
+          var day=html2.match(/property="og:release_date" content="(20\d{2}-\d{2}-\d{2})/);
+          var text=html2.replace(/<[^>]*>/g,'').replace(/\s+/g,'');
+          var ton=text.match(/预计上调油价(\d{2,4})元\/吨/);
+          var range=text.match(/(0\.\d{2})元\/升[—~～-](0\.\d{2})元\/升/);
+          var sameWindow=text.indexOf(Number(window[2])+'月'+Number(window[3])+'日24时')!==-1;
+          if (data.direction==='上调' && sameWindow && day && day[1]===data.date && ton && Number(ton[1])===data.ton && range && Number(range[1])>0 && Number(range[2])>=Number(range[1]) && Number(range[2])<2) data.range=[Number(range[1]),Number(range[2])];
+        }
+        done(data);
+      });
     });
   }
   function pad(v) {return ('0'+Number(v)).slice(-2);}
@@ -49,12 +59,18 @@
     if (result.p98) fuels.splice(2,0,['98汽油',result.p98]);
     var lines=['当前价格'];
     fuels.forEach(function (item) {lines.push(item[0]+'  '+item[1]);});
-    lines.push('','预计调价日期',f?f.window.replace(/^20\d{2}年/,''):'待更新');
+    var range=f && f.range;
+    lines.push('','预计调价日期',f?f.window.replace(/^20\d{2}年/,''):'预测暂不可用');
     lines.push('','预计调价幅度');
-    fuels.forEach(function (item) {lines.push(item[0]+'  待更新');});
+    fuels.forEach(function (item) {
+      var value=range && item[0]!=='98汽油'?'+'+range[0].toFixed(2)+'～'+range[1].toFixed(2):'预测暂不可用';
+      lines.push(item[0]+'  '+value);
+    });
     lines.push('','预计调后价格');
-    fuels.forEach(function (item) {lines.push(item[0]+'  待更新');});
-    // 当前数据源只给标准品吨价；不冒充逐油号升价，不据吨价硬算。
+    fuels.forEach(function (item) {
+      var value=range && item[0]!=='98汽油'?(Number(item[1])+range[0]).toFixed(2)+'～'+(Number(item[1])+range[1]).toFixed(2):'预测暂不可用';
+      lines.push(item[0]+'  '+value);
+    });
     lines.push('','预测仅供参考，以正式公告为准');
     if (!province) lines.push('城市来源HTTP｜页面'+result.date);
     return lines;
