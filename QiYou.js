@@ -10,7 +10,7 @@
   var city = /^([a-z]+(?:-3)?)\/([a-z]+)$/.exec(region);
   if (!province && (!city || !provinces[city[1]])) return fail('地区参数无效，请填省份拼音；陕西用 shanxi-3');
   var url = province ? 'https://www.icauto.com.cn/oil/price_' + province[1] + '_0.html' : 'http://m.qiyoujiage.com/' + region + '.shtml';
-  $httpClient.get({url:url,timeout:10000,headers:{'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1'}},function (err,res,body) {
+  $httpClient.get({url:url,timeout:8000,headers:{'User-Agent':'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Safari/604.1'}},function (err,res,body) {
     if (err || !res || Number(res.status || res.statusCode) !== 200 || !body) return fail('数据源不可用，请稍后再试');
     try {
       var result = province ? parseProvince(body,province[0]) : parseCity(body);
@@ -21,10 +21,56 @@
       if (result.date) details.push('页面日期 '+result.date);
       if (result.changed) details.push('最近调价 '+result.changed);
       if (!province) details.push('城市页为 HTTP 来源');
-      details.push('仅供参考，以加油站报价为准');
-      $done({title:result.name+'油价参考',content:priceLines.concat(details).join('\n'),icon:'fuelpump.fill','icon-color':'#CA3A05'});
+      // 预测独立于实际价格；页面无可验证预测时只显示调价窗口，不编造调后价。
+      fetchForecast(function (forecast) {
+        var lines = forecastLines(result,forecast);
+        details.push('仅供参考，以加油站报价为准');
+        $done({title:result.name+'油价参考',content:priceLines.concat(details.slice(0,-1),lines,details.slice(-1)).join('\n'),icon:'fuelpump.fill','icon-color':'#CA3A05'});
+      });
     } catch(e) { fail('数据解析失败'); }
   });
+  function fetchForecast(done) {
+    var source='https://oil.315i.com/chengpy.html';
+    $httpClient.get({url:source,timeout:3000},function (err,res,html) {
+      if (err || !res || Number(res.status || res.statusCode)!==200 || !html) return done(null);
+      var forecast=html.match(/据金联创测算，截至(\d{1,2})月(\d{1,2})日第[一二三四五六七八九十\d]+个工作日[\s\S]{0,250}?应(上调|下调)(\d{2,4})元\/吨/);
+      var window=html.match(/窗口期：[\s\S]{0,180}?(20\d{2})年(\d{1,2})月(\d{1,2})日/);
+      if (!forecast || !window) return done(null);
+      var posted=window[1]+'-'+pad(forecast[1])+'-'+pad(forecast[2]);
+      if (!validWindow(window,posted)) return done(null);
+      var data={window:window[1]+'年'+window[2]+'月'+window[3]+'日24时',date:posted,ton:Number(forecast[4]),direction:forecast[3]};
+      if (data.ton<50 || data.ton>1500) return done(null);
+      $httpClient.get({url:'https://m.sohu.com/a/1093928064_121455647',timeout:3000},function (err2,res2,html2) {
+        if (!err2 && res2 && Number(res2.status || res2.statusCode)===200 && html2) {
+          var day=html2.match(/property="og:release_date" content="(20\d{2}-\d{2}-\d{2})/);
+          var ton=html2.match(/预计上调油价(\d{2,4})元\/吨/);
+          var range=html2.match(/(0\.\d{2})元\/升[—~～-](0\.\d{2})元\/升/);
+          if (data.direction==='上调' && day && day[1]===data.date && ton && Number(ton[1])===data.ton && range && Number(range[1])>0 && Number(range[2])>=Number(range[1])) data.range=[Number(range[1]),Number(range[2])];
+        }
+        done(data);
+      });
+    });
+  }
+  function pad(v) {return ('0'+Number(v)).slice(-2);}
+  function validWindow(m,posted) {
+    var y=Number(m[1]),mo=Number(m[2]),day=Number(m[3]);
+    var deadline=Date.UTC(y,mo-1,day+1,0,0,0)-8*3600000;
+    var published=Date.parse(posted+'T00:00:00+08:00');
+    return mo>=1 && mo<=12 && day>=1 && day<=31 && deadline>Date.now() && published<=Date.now() && deadline-published<16*86400000;
+  }
+  function forecastLines(result,f) {
+    if (!f) return ['下次调价及预测：暂无可核实数据'];
+    var lines=['下次窗口 '+f.window,'金联创预测 '+f.direction+'约'+f.ton+'元/吨（'+f.date+'）'];
+    if (f.direction==='上调' && f.range) {
+      lines.push('预计每升涨 '+f.range[0].toFixed(2)+'～'+f.range[1].toFixed(2)+' 元（非分油号）');
+      ['p92','p95','d0'].forEach(function (key) {
+        var label={p92:'92号',p95:'95号',d0:'0柴'}[key],current=Number(result[key]);
+        if (current>0) lines.push(label+'调后粗估 '+(current+f.range[0]).toFixed(2)+'～'+(current+f.range[1]).toFixed(2)+' 元/升');
+      });
+    } else lines.push('调后升价：暂无可靠估计');
+    lines.push('预测非官方，正式价格以公告为准');
+    return lines;
+  }
   function parseProvince(html,name) {
     var pattern = new RegExp('(20\\d{2}年\\d{1,2}月\\d{1,2}日)，'+name+'汽油、柴油每升最新价格为：([\\s\\S]*?)<\\/p>');
     var section = html.match(pattern);

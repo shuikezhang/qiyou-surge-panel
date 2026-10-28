@@ -1,5 +1,5 @@
 #!name=油价面板（可核对日期）
-#!desc=省级 92/95/柴油价格；显示数据页面日期与最近调价日期，城市沿用原来源
+#!desc=现价、下次调价窗口与第三方预测区间；正式价格以公告为准
 #!category=🌠 面板模块
 #!arguments=省份拼音:shandong
 #!arguments-desc=陕西填 shanxi-3；城市可填 shanxi-3/xian（城市原站仅 HTTP）
