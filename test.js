@@ -7,16 +7,16 @@ const range='<meta property="og:release_date" content="2026-10-28 16:33"/>10月2
 const now=Date.parse('2026-10-28T20:28:00+08:00');
 function run(arg,reply){let result,reqs=[];const $httpClient={get:(req,cb)=>{reqs.push(req);let x=reply(req,reqs.length);cb(x.error||null,{status:x.status||200},x.body||'');}};vm.runInNewContext(code,{$argument:arg,$httpClient,$done:x=>{assert(!result,'double done');result=x},Date:class extends Date {static now(){return now}},console});return {result,reqs};}
 const normal=(req,i)=>({body:i===1?province:i===2?forecast:range});
-let a=run('anhui',normal);assert.match(a.result.title,/安徽油价 · 元\/升/);assert.match(a.result.content,/当前价格\n92汽油  8\.55\n95汽油  9\.14\n0号柴油  8\.34/);assert.match(a.result.content,/预计调价日期\n10月29日24时/);assert.match(a.result.content,/预计调价幅度\n92汽油  \+0\.31～0\.37\n95汽油  \+0\.31～0\.37\n0号柴油  \+0\.31～0\.37/);assert.match(a.result.content,/预计调后价格\n92汽油  8\.86～8\.92\n95汽油  9\.45～9\.51\n0号柴油  8\.65～8\.71/);assert.doesNotMatch(a.result.content,/粗估|待更新|→/);assert.match(a.result.content,/预测仅供参考，以正式公告为准$/);assert.equal(a.reqs.length,3);assert.match(a.reqs[0].url,/^https:/);
-let b=run('shanxi-3/xian',(req,i)=>({body:i===1?city:forecast}));assert.match(b.result.title,/西安/);assert.match(b.result.content,/城市来源HTTP｜页面2026-09-26/);assert.equal((b.result.content.match(/98汽油/g)||[]).length,3);
-let c=run('anhui',(req,i)=>({body:i===1?province:forecast.replace('2026年10月29日','2026年10月15日')}));assert.match(c.result.content,/预计调价日期\n预测暂不可用/);assert.doesNotMatch(c.result.content,/10月29日/);
-let d=run('anhui',(req,i)=>({body:i===1?province:forecast.replace('上调410','下调400')}));assert.match(d.result.content,/预计调价日期\n10月29日24时/);assert.doesNotMatch(d.result.content,/8\.15|0\.40/);
-let e=run('anhui',(req,i)=>({body:i===1?province:'',status:i===1?200:503}));assert.match(e.result.content,/预计调价日期\n预测暂不可用/);assert.match(e.result.content,/92汽油  8\.55/);
+let a=run('anhui',normal);assert.equal(a.result.title,'安徽油价 · 元/升');assert.equal(a.result.content,'当前价格\n92号  8.55\n95号  9.14\n\n下次调价 · 10月29日24时\n\n预计涨幅 · +0.31～0.37元/升\n\n预计调后价格\n92号  8.86～8.92\n95号  9.45～9.51\n\n预测仅供参考，以正式公告为准');assert(!('icon' in a.result));assert(!('icon-color' in a.result));assert.doesNotMatch(a.result.content,/粗估|待更新|→/);assert.match(a.result.content,/预测仅供参考，以正式公告为准$/);assert.equal(a.reqs.length,3);assert.match(a.reqs[0].url,/^https:/);
+let b=run('shanxi-3/xian',(req,i)=>({body:i===1?city:forecast}));assert.match(b.result.title,/西安/);assert.match(b.result.content,/城市来源HTTP｜页面2026-09-26/);assert.doesNotMatch(b.result.content,/98|柴油/);assert.match(b.result.content,/92号  8\.49\n95号  8\.97/);
+let c=run('anhui',(req,i)=>({body:i===1?province:forecast.replace('2026年10月29日','2026年10月15日')}));assert.match(c.result.content,/下次调价 · 预测暂不可用/);assert.doesNotMatch(c.result.content,/10月29日/);
+let d=run('anhui',(req,i)=>({body:i===1?province:forecast.replace('上调410','下调400')}));assert.match(d.result.content,/下次调价 · 10月29日24时/);assert.doesNotMatch(d.result.content,/8\.15|0\.40/);
+let e=run('anhui',(req,i)=>({body:i===1?province:'',status:i===1?200:503}));assert.match(e.result.content,/下次调价 · 预测暂不可用/);assert.match(e.result.content,/92号  8\.55/);
 let f=run('anhui',()=>({body:'<html></html>'}));assert.match(f.result.content,/格式变更/);
 let g=run('shanxi-3/xian/../../evil',()=>({body:''}));assert.match(g.result.title,/失败/);
-let h=run('anhui',(req,i)=>({body:i===1?province:forecast.replace('截至10月28日','截至10月01日')}));assert.match(h.result.content,/预计调价日期\n预测暂不可用/);
+let h=run('anhui',(req,i)=>({body:i===1?province:forecast.replace('截至10月28日','截至10月01日')}));assert.match(h.result.content,/下次调价 · 预测暂不可用/);
 for (const bad of [range.replace('2026-10-28','2026-10-27'),range.replace('410元/吨','370元/吨'),range.replace('10月29日','10月15日')]) {
-  let r=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast:bad}));assert.match(r.result.content,/92汽油  预测暂不可用/);assert.doesNotMatch(r.result.content,/8\.86|\+0\.31/);
+  let r=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast:bad}));assert.match(r.result.content,/92号  预测暂不可用/);assert.doesNotMatch(r.result.content,/8\.86|\+0\.31/);
 }
-let unavailable=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast:'',status:i===3?403:200}));assert.match(unavailable.result.content,/预计调价日期\n10月29日24时/);assert.doesNotMatch(unavailable.result.content,/8\.86/);
+let unavailable=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast:'',status:i===3?403:200}));assert.match(unavailable.result.content,/下次调价 · 10月29日24时/);assert.doesNotMatch(unavailable.result.content,/8\.86/);
 console.log('12 tests passed');

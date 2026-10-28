@@ -18,7 +18,7 @@
       if ([result.p92,result.p95,result.d0].filter(function (x) {return x !== null;}).length < 3) return fail('报价不完整，暂不展示');
       fetchForecast(function (forecast) {
         var lines = forecastLines(result,forecast,!!province);
-        $done({title:result.name+'油价 · 元/升',content:lines.join('\n'),icon:'fuelpump.fill','icon-color':'#CA3A05'});
+        $done({title:result.name+'油价 · 元/升',content:lines.join('\n')});
       });
     } catch(e) { fail('数据解析失败'); }
   });
@@ -55,20 +55,15 @@
     return mo>=1 && mo<=12 && day>=1 && day<=31 && deadline>Date.now() && published<=Date.now() && deadline-published<16*86400000;
   }
   function forecastLines(result,f,province) {
-    var fuels=[['92汽油',result.p92],['95汽油',result.p95],['0号柴油',result.d0]];
-    if (result.p98) fuels.splice(2,0,['98汽油',result.p98]);
+    var fuels=[['92号',result.p92],['95号',result.p95]];
     var lines=['当前价格'];
     fuels.forEach(function (item) {lines.push(item[0]+'  '+item[1]);});
     var range=f && f.range;
-    lines.push('','预计调价日期',f?f.window.replace(/^20\d{2}年/,''):'预测暂不可用');
-    lines.push('','预计调价幅度');
-    fuels.forEach(function (item) {
-      var value=range && item[0]!=='98汽油'?'+'+range[0].toFixed(2)+'～'+range[1].toFixed(2):'预测暂不可用';
-      lines.push(item[0]+'  '+value);
-    });
+    lines.push('','下次调价 · '+(f?f.window.replace(/^20\d{2}年/,''):'预测暂不可用'));
+    lines.push('','预计涨幅 · '+(range?'+'+range[0].toFixed(2)+'～'+range[1].toFixed(2)+'元/升':'预测暂不可用'));
     lines.push('','预计调后价格');
     fuels.forEach(function (item) {
-      var value=range && item[0]!=='98汽油'?(Number(item[1])+range[0]).toFixed(2)+'～'+(Number(item[1])+range[1]).toFixed(2):'预测暂不可用';
+      var value=range?(Number(item[1])+range[0]).toFixed(2)+'～'+(Number(item[1])+range[1]).toFixed(2):'预测暂不可用';
       lines.push(item[0]+'  '+value);
     });
     lines.push('','预测仅供参考，以正式公告为准');
