@@ -1,0 +1,11 @@
+#!name=油价面板（可核对日期）
+#!desc=省级 92/95/柴油价格；显示数据页面日期与最近调价日期，城市沿用原来源
+#!category=🌠 面板模块
+#!arguments=省份拼音:shandong
+#!arguments-desc=陕西填 shanxi-3；城市可填 shanxi-3/xian（城市原站仅 HTTP）
+
+[Panel]
+QiYou = script-name=QiYou,update-interval=43200
+
+[Script]
+QiYou = type=generic,timeout=15,script-path=https://raw.githubusercontent.com/shuikezhang/qiyou-surge-panel/main/QiYou.js,argument={{{省份拼音}}}
