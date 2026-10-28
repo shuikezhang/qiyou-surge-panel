@@ -7,12 +7,12 @@ const range='<meta property="og:release_date" content="2026-10-28 16:33"/>预计
 const now=Date.parse('2026-10-28T20:28:00+08:00');
 function run(arg,reply){let result,reqs=[];const $httpClient={get:(req,cb)=>{reqs.push(req);let x=reply(req,reqs.length);cb(x.error||null,{status:x.status||200},x.body||'');}};vm.runInNewContext(code,{$argument:arg,$httpClient,$done:x=>{assert(!result,'double done');result=x},Date:class extends Date {static now(){return now}},console});return {result,reqs};}
 const normal=(req,i)=>({body:i===1?province:i===2?forecast:range});
-let a=run('anhui',normal);assert.match(a.result.content,/92号汽油  8\.55 元\/升/);assert.match(a.result.content,/下次窗口 2026年10月29日24时/);assert.match(a.result.content,/金联创预测 上调约410元\/吨/);assert.match(a.result.content,/92号调后粗估 8\.86～8\.92 元\/升/);assert.match(a.result.content,/95号调后粗估 9\.45～9\.51 元\/升/);assert.match(a.result.content,/0柴调后粗估 8\.65～8\.71 元\/升/);assert.match(a.result.content,/非官方/);assert.match(a.reqs[0].url,/^https:/);
-let b=run('shanxi-3/xian',(req,i)=>({body:i===1?city:i===2?forecast:range}));assert.match(b.result.title,/西安/);assert.match(b.result.content,/HTTP 来源/);assert.match(b.result.content,/95号调后粗估/);
-let c=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast.replace('2026年10月29日','2026年10月15日'):range}));assert.match(c.result.content,/预测：暂无可核实数据/);assert.doesNotMatch(c.result.content,/调后粗估/);
-let d=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast:range.replace('410元/吨','370元/吨')}));assert.match(d.result.content,/约410元\/吨/);assert.match(d.result.content,/调后升价：暂无可靠估计/);
-let e=run('anhui',(req,i)=>({body:i===1?province:'',status:i===1?200:503}));assert.match(e.result.content,/预测：暂无可核实数据/);
+let a=run('anhui',normal);assert.match(a.result.content,/92  8\.55 → 8\.86～8\.92/);assert.match(a.result.content,/95  9\.14 → 9\.45～9\.51/);assert.match(a.result.content,/0柴  8\.34 → 8\.65～8\.71/);assert.match(a.result.content,/下次10月29日24时｜预计上调410元\/吨/);assert.match(a.result.content,/预测10\/28｜→粗估非官方/);assert(a.result.content.split('\n').length<=5);assert.match(a.reqs[0].url,/^https:/);
+let b=run('shanxi-3/xian',(req,i)=>({body:i===1?city:i===2?forecast:range}));assert.match(b.result.title,/西安/);assert.match(b.result.content,/城市来源HTTP/);assert.match(b.result.content,/95  8\.97 →/);
+let c=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast.replace('2026年10月29日','2026年10月15日'):range}));assert.match(c.result.content,/下次调价：暂无可核实预测/);assert.doesNotMatch(c.result.content,/ → /);
+let d=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast:range.replace('410元/吨','370元/吨')}));assert.match(d.result.content,/预计上调410元\/吨/);assert.match(d.result.content,/调后价暂无法估算/);
+let e=run('anhui',(req,i)=>({body:i===1?province:'',status:i===1?200:503}));assert.match(e.result.content,/下次调价：暂无可核实预测/);
 let f=run('anhui',()=>({body:'<html></html>'}));assert.match(f.result.content,/格式变更/);
 let g=run('shanxi-3/xian/../../evil',()=>({body:''}));assert.match(g.result.title,/失败/);
-let h=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast.replace('截至10月28日','截至10月01日'):range}));assert.match(h.result.content,/预测：暂无可核实数据/);
+let h=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast.replace('截至10月28日','截至10月01日'):range}));assert.match(h.result.content,/下次调价：暂无可核实预测/);
 console.log('8 tests passed');

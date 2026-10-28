@@ -15,17 +15,10 @@
     try {
       var result = province ? parseProvince(body,province[0]) : parseCity(body);
       if (!result) return fail('数据源格式变更，无法核实报价');
-      var priceLines = [['0号柴油',result.d0],['92号汽油',result.p92],['95号汽油',result.p95],['98号汽油',result.p98]].filter(function (x) {return x[1] !== null;}).map(function (x) {return x[0]+'  '+x[1]+' 元/升';});
-      if (priceLines.length < 3) return fail('报价不完整，暂不展示');
-      var details = [];
-      if (result.date) details.push('页面日期 '+result.date);
-      if (result.changed) details.push('最近调价 '+result.changed);
-      if (!province) details.push('城市页为 HTTP 来源');
-      // 预测独立于实际价格；页面无可验证预测时只显示调价窗口，不编造调后价。
+      if ([result.p92,result.p95,result.d0].filter(function (x) {return x !== null;}).length < 3) return fail('报价不完整，暂不展示');
       fetchForecast(function (forecast) {
-        var lines = forecastLines(result,forecast);
-        details.push('仅供参考，以加油站报价为准');
-        $done({title:result.name+'油价参考',content:priceLines.concat(details.slice(0,-1),lines,details.slice(-1)).join('\n'),icon:'fuelpump.fill','icon-color':'#CA3A05'});
+        var lines = forecastLines(result,forecast,!!province);
+        $done({title:result.name+'油价参考',content:lines.join('\n'),icon:'fuelpump.fill','icon-color':'#CA3A05'});
       });
     } catch(e) { fail('数据解析失败'); }
   });
@@ -58,17 +51,24 @@
     var published=Date.parse(posted+'T00:00:00+08:00');
     return mo>=1 && mo<=12 && day>=1 && day<=31 && deadline>Date.now() && published<=Date.now() && deadline-published<16*86400000;
   }
-  function forecastLines(result,f) {
-    if (!f) return ['下次调价及预测：暂无可核实数据'];
-    var lines=['下次窗口 '+f.window,'金联创预测 '+f.direction+'约'+f.ton+'元/吨（'+f.date+'）'];
-    if (f.direction==='上调' && f.range) {
-      lines.push('预计每升涨 '+f.range[0].toFixed(2)+'～'+f.range[1].toFixed(2)+' 元（非分油号）');
-      ['p92','p95','d0'].forEach(function (key) {
-        var label={p92:'92号',p95:'95号',d0:'0柴'}[key],current=Number(result[key]);
-        if (current>0) lines.push(label+'调后粗估 '+(current+f.range[0]).toFixed(2)+'～'+(current+f.range[1]).toFixed(2)+' 元/升');
-      });
-    } else lines.push('调后升价：暂无可靠估计');
-    lines.push('预测非官方，正式价格以公告为准');
+  function forecastLines(result,f,province) {
+    var lines=[];
+    var estimate=f && f.direction==='上调' && f.range;
+    [['92',result.p92],['95',result.p95],['0柴',result.d0]].forEach(function (item) {
+      var row=item[0]+'  '+item[1];
+      if (estimate) row+=' → '+(Number(item[1])+f.range[0]).toFixed(2)+'～'+(Number(item[1])+f.range[1]).toFixed(2);
+      lines.push(row);
+    });
+    if (result.p98) lines.push('98  '+result.p98);
+    if (!f) lines.push('下次调价：暂无可核实预测');
+    else {
+      lines.push('下次'+f.window.replace(/^20\d{2}年/,'')+'｜预计'+f.direction+f.ton+'元/吨');
+      if (!estimate) lines.push('调后价暂无法估算');
+    }
+    var dates='现价页'+result.date.replace(/^20\d{2}年/,'').replace('月','/').replace('日','');
+    if (f) dates+='｜预测'+f.date.slice(5).replace('-','/');
+    lines.push(dates+(estimate?'｜→粗估非官方':'｜仅供参考'));
+    if (!province) lines.push('城市来源HTTP');
     return lines;
   }
   function parseProvince(html,name) {
