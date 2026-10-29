@@ -23,62 +23,69 @@
     } catch(e) { fail('数据解析失败'); }
   });
   function fetchForecast(done) {
-    var source='https://oil.315i.com/chengpy.html';
-    $httpClient.get({url:source,timeout:3000},function (err,res,html) {
-      if (err || !res || Number(res.status || res.statusCode)!==200 || !html) return done(null);
-      var plain=html.replace(/<[^>]*>/g,'').replace(/\s+/g,'');
-      var forecast=plain.match(/据金联创测算，截至(\d{1,2})月(\d{1,2})日第[一二三四五六七八九十\d]+个工作日[\s\S]{0,250}?(?:应|分别)?(上调|下调)(\d{2,4})(?:和\d{2,4})?元\/吨/);
-      var window=html.match(/窗口期：[\s\S]{0,180}?(20\d{2})年(\d{1,2})月(\d{1,2})日/);
-      if (!window) return done(null);
-      var posted=window[1]+'-'+pad(forecast?forecast[1]:window[2])+'-'+pad(forecast?forecast[2]:window[3]);
-      if (!validWindow(window,posted)) return done(null);
-      var data={window:window[1]+'年'+window[2]+'月'+window[3]+'日24时',date:posted,ton:forecast?Number(forecast[4]):null,direction:forecast?forecast[3]:null};
-      if (data.ton!==null && (data.ton<50 || data.ton>1500)) return done(null);
-      // 本轮已有发改委正式公告，优先用其汽油吨价；官方未公布分油号升价时不换算。
-      if (data.window==='2026年10月29日24时' && Date.now()>=Date.parse('2026-10-29T15:03:00+08:00')) {
-        $httpClient.get({url:'https://www.ndrc.gov.cn/xwdt/xwfb/202610/t20261029_1408449_ext.html',timeout:3000},function (officialErr,officialRes,officialHtml) {
-          var officialText=officialHtml && officialHtml.replace(/<[^>]*>/g,'').replace(/\s+/g,'');
-          var confirmed=officialText && officialText.match(/自10月29日24时起[\s\S]{0,220}?调控后实际上调(\d{2,4})元、(\d{2,4})元/);
-          if (!officialErr && officialRes && Number(officialRes.status || officialRes.statusCode)===200 && confirmed && Number(confirmed[1])===345 && Number(confirmed[2])===335) {
-            data.official=true;
-            data.ton=Number(confirmed[1]);
-            return fetchEstimate();
-          }
-          // 今日正式公告访问失败也不退回旧媒体预测，以免展示过时的每升涨幅。
-          done(null);
-        });
-      } else if (forecast) fetchMediaRange(); else done(null);
-      // 同一轮历史新闻的 345 元/吨估算仅作预计升价，非官方分油号定价。
-      function fetchEstimate() {
-        $httpClient.get({url:'https://view.inews.qq.com/k/20261026A0BD2E00?scene=wap&no-redirect=1',timeout:3000},function (estimateErr,estimateRes,estimateHtml) {
-          var text=estimateHtml && estimateHtml.replace(/<[^>]*>/g,'').replace(/\s+/g,'');
-          var match=text && text.match(/10月29日（本周四）24时进行[\s\S]{0,250}?预计上调汽柴油(\d{2,4})元\/吨[\s\S]{0,50}?(0\.\d{2})元\/升[—~～-](0\.\d{2})元\/升/);
-          if (!estimateErr && estimateRes && Number(estimateRes.status || estimateRes.statusCode)===200 && match && Number(match[1])===data.ton && Number(match[2])>0 && Number(match[3])>=Number(match[2]) && Number(match[3])<2) data.range=[Number(match[2]),Number(match[3])];
-          done(data);
-        });
-      }
-      // 未有官方确认时，升价采用同日媒体范围，不把标准品吨价换算成升价。
-      function fetchMediaRange() {
-      $httpClient.get({url:'https://m.sohu.com/a/1093928064_121455647',timeout:3000},function (err2,res2,html2) {
-        if (!err2 && res2 && Number(res2.status || res2.statusCode)===200 && html2) {
-          var day=html2.match(/property="og:release_date" content="(20\d{2}-\d{2}-\d{2})/);
-          var text=html2.replace(/<[^>]*>/g,'').replace(/\s+/g,'');
-          var ton=text.match(/预计上调油价(\d{2,4})元\/吨/);
-          var range=text.match(/(0\.\d{2})元\/升[—~～-](0\.\d{2})元\/升/);
-          var sameWindow=text.indexOf(Number(window[2])+'月'+Number(window[3])+'日24时')!==-1;
-          if (data.direction==='上调' && sameWindow && day && day[1]===data.date && ton && Number(ton[1])===data.ton && range && Number(range[1])>0 && Number(range[2])>=Number(range[1]) && Number(range[2])<2) data.range=[Number(range[1]),Number(range[2])];
+    var today=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
+    var prediction=null,official=null,pending=2,blocked=false;
+    function finish() {
+      if (--pending!==0) return;
+      // 发现今日正式文章却无法读懂实际调幅时，拒绝回退到可能失效的机构预测。
+      done(blocked?null:withEstimate(official || prediction));
+    }
+    $httpClient.get({url:'https://oil.315i.com/chengpy.html',timeout:2500},function (err,res,html) {
+      if (!err && res && Number(res.status || res.statusCode)===200 && html) {
+        var text=plainText(html).replace(/\s+/g,'');
+        var w=text.match(/窗口期[:：](20\d{2})年(\d{1,2})月(\d{1,2})日/);
+        var e=text.match(/据金联创测算[,，]?截至(\d{1,2})月(\d{1,2})日[\s\S]{0,260}?(?:应|分别)?(上调|下调)(\d{2,4})(?:[和、]\d{2,4})?元\/吨/);
+        // 公告栏措辞变动时，独立尝试同页日期/调幅数据表。
+        if (!e) e=text.match(/对应幅度[（(]元\/吨[）)](\d{1,2})月(\d{1,2})日[\s\S]{0,45}?(上调|下调)(\d{2,4})(?:[、和]\d{2,4})?工作日/);
+        if (w && e) {
+          var year=Number(w[1])-(Number(e[1])>Number(w[2])?1:0);
+          var posted=year+'-'+pad(e[1])+'-'+pad(e[2]);
+          if (validWindow(w,posted) && Number(e[4])>=50 && Number(e[4])<=1500) prediction={window:w[1]+'年'+w[2]+'月'+w[3]+'日24时',date:posted,ton:Number(e[4]),direction:e[3]};
         }
-        done(data);
-      });
       }
+      finish();
     });
+    $httpClient.get({url:'https://www.ndrc.gov.cn/xwdt/xwfb/',timeout:2500},function (err,res,html) {
+      if (err || !res || Number(res.status || res.statusCode)!==200 || !html) return finish();
+      var articles=/<li\b[^>]*>([\s\S]*?)<\/li>/gi,m,link=null;
+      while ((m=articles.exec(html))!==null) {
+        var item=plainText(m[1]),date=item.match(/(20\d{2})[\/-](\d{1,2})[\/-](\d{1,2})/);
+        var href=m[1].match(/href=["'](\.\/(?:20\d{4})\/t\d{8}_\d+\.html)["']/);
+        if (date && href && date[1]+'-'+pad(date[2])+'-'+pad(date[3])===today && /成品油价格|成品油.*调控/.test(item)) {link=href[1];break;}
+      }
+      if (!link) return finish();
+      $httpClient.get({url:'https://www.ndrc.gov.cn/xwdt/xwfb/'+link.slice(2),timeout:2500},function (aErr,aRes,article) {
+        if (aErr || !aRes || Number(aRes.status || aRes.statusCode)!==200 || !article) {blocked=true;return finish();}
+        var body=plainText(article).replace(/\s+/g,'');
+        var w=today.split('-');
+        var data={window:w[0]+'年'+Number(w[1])+'月'+Number(w[2])+'日24时',date:today,official:true};
+        if (/本次(?:国内成品油|汽、柴油)价格不作调整/.test(body)) {
+          data.ton=0;data.direction='不调整';official=data;return finish();
+        }
+        // 必须有正文同日生效时间；调整前回顾中的旧调幅不能被误取。
+        var effective=new RegExp('(?:自)?'+Number(w[1])+'月'+Number(w[2])+'日(?:24时起|国内汽)');
+        var actual=body.match(/调控后实际(上调|下调)(\d{2,4})元[、,，](\d{2,4})元/);
+        if (!actual && !/调控后|实际(?:上调|下调)/.test(body)) actual=body.match(/国内汽、柴油[（(]标准品[）)]价格每吨分别(上调|下调)(\d{2,4})元[、,，](\d{2,4})元/);
+        if (!effective.test(body) || !actual || Number(actual[2])<50 || Number(actual[2])>1500 || Number(actual[3])<0 || Number(actual[3])>1500) {blocked=true;return finish();}
+        data.direction=actual[1];data.ton=Number(actual[2]);official=data;finish();
+      });
+    });
+  }
+  function plainText(html) {return String(html).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/g,' ').replace(/\s+/g,' ').trim();}
+  function withEstimate(data) {
+    if (!data) return null;
+    // 经验比例，仅作升价估算，非官方分油号换算。345元/吨→0.26～0.31，410→0.31～0.37。
+    if (data.ton===0) data.range=[0,0];
+    else data.range=[Math.round(data.ton*0.00075*100)/100,Math.round(data.ton*0.0009*100)/100];
+    return data;
   }
   function pad(v) {return ('0'+Number(v)).slice(-2);}
   function validWindow(m,posted) {
     var y=Number(m[1]),mo=Number(m[2]),day=Number(m[3]);
     var deadline=Date.UTC(y,mo-1,day+1,0,0,0)-8*3600000;
     var published=Date.parse(posted+'T00:00:00+08:00');
-    return mo>=1 && mo<=12 && day>=1 && day<=31 && deadline>Date.now() && published<=Date.now() && deadline-published<16*86400000;
+    var normalized=new Date(Date.UTC(y,mo-1,day)).toISOString().slice(0,10);
+    return normalized===y+'-'+pad(mo)+'-'+pad(day) && deadline>Date.now() && published<=Date.now() && Date.now()-published<=4*86400000 && deadline-published<16*86400000;
   }
   function forecastLines(result,f,province) {
     var fuels=[['92号',result.p92],['95号',result.p95]];
@@ -86,13 +93,16 @@
     fuels.forEach(function (item) {lines.push(item[0]+'  '+item[1]);});
     var range=f && f.range;
     lines.push('','下次调价 · '+(f?f.window.replace(/^20\d{2}年/,''):'预测暂不可用'));
-    lines.push('','预计涨幅 · '+(range?'+'+range[0].toFixed(2)+'～'+range[1].toFixed(2)+'元/升':'预测暂不可用'));
+    var sign=f && f.direction==='下调'?-1:1;
+    lines.push('','预计涨跌 · '+(range?(f.ton===0?'不调整':(sign<0?'-':'+')+range[0].toFixed(2)+'～'+range[1].toFixed(2)+'元/升'):'预测暂不可用'));
     lines.push('','预计调后价格');
     fuels.forEach(function (item) {
-      var value=range?(Number(item[1])+range[0]).toFixed(2)+'～'+(Number(item[1])+range[1]).toFixed(2):'预测暂不可用';
+      var low=range && Number(item[1])+sign*(sign<0?range[1]:range[0]);
+      var high=range && Number(item[1])+sign*(sign<0?range[0]:range[1]);
+      var value=range?(f.ton===0?Number(item[1]).toFixed(2):low.toFixed(2)+'～'+high.toFixed(2)):'预测暂不可用';
       lines.push(item[0]+'  '+value);
     });
-    lines.push('',f && f.official ? '升价为媒体估算；官方汽油+'+f.ton+'元/吨' : '预测仅供参考，以正式公告为准');
+    lines.push('',f?'升价为模型估算；'+(f.official?'官方':'机构预测')+'汽油'+(f.ton===0?'不调整':(sign<0?'-':'+')+f.ton+'元/吨'):'预测仅供参考，以正式公告为准');
     if (!province) lines.push('城市来源HTTP｜页面'+result.date);
     return lines;
   }

@@ -1,30 +1,38 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const code=fs.readFileSync(__dirname+'/QiYou.js','utf8');
-const province='<p>2026年10月28日，安徽汽油、柴油每升最新价格为：<a>92号汽油</a>为8.55元，<a>95号汽油</a>为9.14元，<a>0号柴油</a>为8.34元，</p><tr><td>2026-09-24</td>';
-const city='<div class="daota01_title"><h1>西安油价</h1><br>2026-09-26</div><dl><dt>西安92号汽油</dt><dd>8.49(元)</dd></dl><dl><dt>西安95号汽油</dt><dd>8.97(元)</dd></dl><dl><dt>西安98号汽油</dt><dd>10.25(元)</dd></dl><dl><dt>西安0号柴油</dt><dd>8.19(元)</dd></dl>';
-const forecast='<p>据金联创测算，截至10月28日第九个工作日，参考原油品种均价为106.05美元/桶，变化率为7.18%，影响国内汽柴油标准品零售价应上调410元/吨。</p>窗口期：<td>2026年10月29日</td>';
-const range='<meta property="og:release_date" content="2026-10-28 16:33"/>10月29日24时进行，预计上调油价410元/吨，汽柴油价格将大涨0.31元/升—0.37元/升';
-const now=Date.parse('2026-10-28T20:28:00+08:00');
-function run(arg,reply,clock=now){let result,reqs=[];const $httpClient={get:(req,cb)=>{reqs.push(req);let x=reply(req,reqs.length);cb(x.error||null,{status:x.status||200},x.body||'');}};vm.runInNewContext(code,{$argument:arg,$httpClient,$done:x=>{assert(!result,'double done');result=x},Date:class extends Date {static now(){return clock}},console});return {result,reqs};}
-const normal=(req,i)=>({body:i===1?province:i===2?forecast:range});
-let a=run('anhui',normal);assert.equal(a.result.title,'安徽油价 · 元/升');assert.equal(a.result.content,'当前价格\n92号  8.55\n95号  9.14\n\n下次调价 · 10月29日24时\n\n预计涨幅 · +0.31～0.37元/升\n\n预计调后价格\n92号  8.86～8.92\n95号  9.45～9.51\n\n预测仅供参考，以正式公告为准');assert(!('icon' in a.result));assert(!('icon-color' in a.result));assert.doesNotMatch(a.result.content,/粗估|待更新|→/);assert.match(a.result.content,/预测仅供参考，以正式公告为准$/);assert.equal(a.reqs.length,3);assert.match(a.reqs[0].url,/^https:/);
-let b=run('shanxi-3/xian',(req,i)=>({body:i===1?city:forecast}));assert.match(b.result.title,/西安/);assert.match(b.result.content,/城市来源HTTP｜页面2026-09-26/);assert.doesNotMatch(b.result.content,/98|柴油/);assert.match(b.result.content,/92号  8\.49\n95号  8\.97/);
-let c=run('anhui',(req,i)=>({body:i===1?province:forecast.replace('2026年10月29日','2026年10月15日')}));assert.match(c.result.content,/下次调价 · 预测暂不可用/);assert.doesNotMatch(c.result.content,/10月29日/);
-let d=run('anhui',(req,i)=>({body:i===1?province:forecast.replace('上调410','下调400')}));assert.match(d.result.content,/下次调价 · 10月29日24时/);assert.doesNotMatch(d.result.content,/8\.15|0\.40/);
-let e=run('anhui',(req,i)=>({body:i===1?province:'',status:i===1?200:503}));assert.match(e.result.content,/下次调价 · 预测暂不可用/);assert.match(e.result.content,/92号  8\.55/);
-let f=run('anhui',()=>({body:'<html></html>'}));assert.match(f.result.content,/格式变更/);
-let g=run('shanxi-3/xian/../../evil',()=>({body:''}));assert.match(g.result.title,/失败/);
-let h=run('anhui',(req,i)=>({body:i===1?province:forecast.replace('截至10月28日','截至10月01日')}));assert.match(h.result.content,/下次调价 · 预测暂不可用/);
-for (const bad of [range.replace('2026-10-28','2026-10-27'),range.replace('410元/吨','370元/吨'),range.replace('10月29日','10月15日')]) {
-  let r=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast:bad}));assert.match(r.result.content,/92号  预测暂不可用/);assert.doesNotMatch(r.result.content,/8\.86|\+0\.31/);
+const province='<p>2026年10月29日，安徽汽油、柴油每升最新价格为：<a>92号汽油</a>为8.55元，<a>95号汽油</a>为9.14元，<a>0号柴油</a>为8.34元，</p>';
+const jlc=(day,win,ton=410,dir='上调')=>`<p>据金联创测算，截至${day}第十个工作日，影响国内汽柴油标准品零售价分别${dir}<span>${ton}和335</span>元/吨。</p>窗口期：<td>${win}</td>`;
+const list=(day='2026/10/29',path='./202610/t20261029_1408449.html')=>`<li class="news"><a title="国内成品油价格调整" href="${path}"><span>国内成品油价格调整</span></a><span>${day}</span></li>`;
+const official='<div>根据现行价格机制计算，自10月29日24时起，国内汽、柴油（标准品）价格每吨分别应上调440元、420元，调控后实际上调345元、335元。</div>';
+function run({time='2026-10-29T16:30:00+08:00',forecast=jlc('10月29日','2026年10月29日'),index=list(),article=official,arg='anhui',price=province,reverse=false}={}) {
+ let result,count=0,queue=[],reqs=[];const clock=Date.parse(time);
+ const $httpClient={get:(req,cb)=>{reqs.push(req.url);let body=req.url.includes('icauto')||req.url.includes('qiyoujiage')?price:req.url.includes('315i')?forecast:req.url.endsWith('/xwfb/')?index:article;
+ const job=()=>cb(body===null?'network':null,{status:body===null?503:200},body||'');queue.push(job)}};
+ vm.runInNewContext(code,{$argument:arg,$httpClient,$done:x=>{assert(!result,'double done');result=x;count++},Date:class extends Date{static now(){return clock}},console});
+ while(queue.length){if(reverse)queue.pop()();else queue.shift()();}assert.equal(count,1);return {result,reqs};
 }
-let unavailable=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast:'',status:i===3?403:200}));assert.match(unavailable.result.content,/下次调价 · 10月29日24时/);assert.doesNotMatch(unavailable.result.content,/8\.86/);
-const official='<div>自10月29日24时起，国内汽、柴油（标准品）价格每吨分别应上调440元、420元，统筹兼顾减轻下游用户负担和保障成品油安全稳定供应，调控后实际上调345元、335元。</div>';
-const estimate='<div>下次油价调整将在10月29日（本周四）24时进行本轮油价10个工作日统计周期，到今天已经进行7个工作日统计，受到上周国际油价连续上涨的影响，目前国际原油变化率达到6.17%，预计上调汽柴油345元/吨，折合升计算，就是上涨汽柴油价格0.26元/升—0.31元/升。</div>';
-const liveForecast='<p>据金联创测算，截至10月29日第十个工作日，影响国内汽柴油标准品零售价分别上调<span>345和335</span>元/吨。</p>窗口期：<td>2026年10月29日</td>';
-const post=Date.parse('2026-10-29T15:33:00+08:00');
-let live=run('anhui',(req,i)=>({body:i===1?province:i===2?liveForecast:i===3?official:estimate}),post);assert.equal(live.reqs.length,4);assert.match(live.reqs[2].url,/ndrc.gov.cn/);assert.match(live.result.content,/预计涨幅 · \+0\.26～0\.31元\/升/);assert.match(live.result.content,/官方汽油\+345元\/吨/);assert.match(live.result.content,/92号  8\.81～8\.86/);assert.match(live.result.content,/95号  9\.40～9\.45/);
-let badEstimate=run('anhui',(req,i)=>({body:i===1?province:i===2?liveForecast:i===3?official:estimate.replace('345元/吨','410元/吨')}),post);assert.doesNotMatch(badEstimate.result.content,/92号  8\.81|95号  9\.40/);
-let old=run('anhui',(req,i)=>({body:i===1?province:i===2?forecast:range}),post);assert.equal(old.reqs.length,3);assert.doesNotMatch(old.result.content,/\+0\.31|8\.86|10月29日24时/);
-let wrong=run('anhui',(req,i)=>({body:i===1?province:i===2?liveForecast:official.replace('345元、335元','350元、335元')}),post);assert.doesNotMatch(wrong.result.content,/官方汽油|\+0\.31/);
-console.log('16 tests passed');
+let tests=0;function test(name,fn){fn();tests++;console.log('PASS '+name)}
+test('official overrides theoretical and old prediction',()=>{let {result,reqs}=run();assert.match(result.content,/8\.81～8\.86/);assert.match(result.content,/9\.40～9\.45/);assert.match(result.content,/官方汽油\+345/);assert.equal(reqs.length,4);assert.doesNotMatch(result.content,/媒体|粗估/);assert(!result.icon)});
+test('parallel callback order independent',()=>{assert.equal(run({reverse:true}).result.content,run().result.content)});
+test('official works when JLC unavailable',()=>assert.match(run({forecast:null}).result.content,/官方汽油\+345/));
+test('prediction works when official index unavailable',()=>assert.match(run({index:null}).result.content,/机构预测汽油\+410/));
+test('before announcement never use past official',()=>{let r=run({time:'2026-10-28T17:00:00+08:00',forecast:jlc('10月28日','2026年10月29日'),index:list('2026/10/15')});assert.match(r.result.content,/8\.86～8\.92/);assert.equal(r.reqs.length,3)});
+test('found unreadable announcement blocks old prediction',()=>assert.doesNotMatch(run({article:'new format no actual data'}).result.content,/8\.86|\+410/));
+test('article HTTP failure blocks old prediction',()=>assert.match(run({article:null}).result.content,/预测暂不可用/));
+test('downward ranges order low to high',()=>{let r=run({index:'',forecast:jlc('10月29日','2026年10月29日',555,'下调')});assert.match(r.result.content,/-0\.42～0\.50/);assert.match(r.result.content,/8\.05～8\.13/)});
+test('normal official down adjustment',()=>{let r=run({article:'自10月29日24时起，国内汽、柴油（标准品）价格每吨分别下调555元、530元。'});assert.match(r.result.content,/官方汽油-555/)});
+test('no adjustment retains current prices',()=>{let r=run({article:'本次汽、柴油价格不作调整。'});assert.match(r.result.content,/预计涨跌 · 不调整/);assert.match(r.result.content,/官方汽油不调整/)});
+test('cross month target and forecast',()=>{let r=run({time:'2026-10-31T18:00:00+08:00',forecast:jlc('10月31日','2026年11月5日'),index:''});assert.match(r.result.content,/11月5日24时/)});
+test('cross year target and forecast',()=>{let r=run({time:'2026-12-31T18:00:00+08:00',forecast:jlc('12月31日','2027年1月5日'),index:''});assert.match(r.result.content,/1月5日24时/)});
+test('expired cycle rejected at midnight',()=>{let r=run({time:'2026-10-30T00:00:00+08:00',index:list('2026/10/29')});assert.match(r.result.content,/预测暂不可用/)});
+test('over four day observation rejected',()=>assert.match(run({forecast:jlc('10月24日','2026年10月29日'),index:''}).result.content,/预测暂不可用/));
+test('future observation rejected',()=>assert.match(run({forecast:jlc('10月30日','2026年11月5日'),index:''}).result.content,/预测暂不可用/));
+test('invalid calendar date rejected',()=>assert.match(run({forecast:jlc('10月29日','2026年11月31日'),index:''}).result.content,/预测暂不可用/));
+test('huge ton rejected',()=>assert.match(run({forecast:jlc('10月29日','2026年10月29日',9999),index:''}).result.content,/预测暂不可用/));
+test('no same-day effective date rejects article',()=>assert.match(run({article:official.replace('10月29日','10月15日')}).result.content,/预测暂不可用/));
+test('old cycle item not reused',()=>assert.match(run({index:list('2026/10/15')}).result.content,/机构预测汽油\+410/));
+test('markup and entities inside ton are normalized',()=>assert.match(run({index:'',forecast:jlc('10月29日','2026年10月29日').replace('410和335','<b>410</b>&nbsp;和335')}).result.content,/机构预测汽油\+410/));
+test('both sources unavailable current price survives',()=>assert.match(run({forecast:null,index:null}).result.content,/92号  8\.55/));
+test('invalid region stops safely',()=>assert.match(run({arg:'../../bad'}).result.title,/失败/));
+test('JLC table fallback independent of banner wording',()=>{let r=run({index:'',forecast:'<td>对应幅度(元/吨)</td><td>10月29日</td><td>7.94%</td><td>↑0.76</td><td>上调345、335</td><td>工作日：10</td><td>窗口期：2026年10月29日</td>'});assert.match(r.result.content,/机构预测汽油\+345/)});
+console.log(`${tests} tests passed`);
