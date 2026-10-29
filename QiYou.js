@@ -26,14 +26,39 @@
     var source='https://oil.315i.com/chengpy.html';
     $httpClient.get({url:source,timeout:3000},function (err,res,html) {
       if (err || !res || Number(res.status || res.statusCode)!==200 || !html) return done(null);
-      var forecast=html.match(/据金联创测算，截至(\d{1,2})月(\d{1,2})日第[一二三四五六七八九十\d]+个工作日[\s\S]{0,250}?应(上调|下调)(\d{2,4})元\/吨/);
+      var plain=html.replace(/<[^>]*>/g,'').replace(/\s+/g,'');
+      var forecast=plain.match(/据金联创测算，截至(\d{1,2})月(\d{1,2})日第[一二三四五六七八九十\d]+个工作日[\s\S]{0,250}?(?:应|分别)?(上调|下调)(\d{2,4})(?:和\d{2,4})?元\/吨/);
       var window=html.match(/窗口期：[\s\S]{0,180}?(20\d{2})年(\d{1,2})月(\d{1,2})日/);
-      if (!forecast || !window) return done(null);
-      var posted=window[1]+'-'+pad(forecast[1])+'-'+pad(forecast[2]);
+      if (!window) return done(null);
+      var posted=window[1]+'-'+pad(forecast?forecast[1]:window[2])+'-'+pad(forecast?forecast[2]:window[3]);
       if (!validWindow(window,posted)) return done(null);
-      var data={window:window[1]+'年'+window[2]+'月'+window[3]+'日24时',date:posted,ton:Number(forecast[4]),direction:forecast[3]};
-      if (data.ton<50 || data.ton>1500) return done(null);
-      // 升价采用同日媒体的汽柴油预测范围，不把标准品吨价直接换算成升价。
+      var data={window:window[1]+'年'+window[2]+'月'+window[3]+'日24时',date:posted,ton:forecast?Number(forecast[4]):null,direction:forecast?forecast[3]:null};
+      if (data.ton!==null && (data.ton<50 || data.ton>1500)) return done(null);
+      // 本轮已有发改委正式公告，优先用其汽油吨价；官方未公布分油号升价时不换算。
+      if (data.window==='2026年10月29日24时' && Date.now()>=Date.parse('2026-10-29T15:03:00+08:00')) {
+        $httpClient.get({url:'https://www.ndrc.gov.cn/xwdt/xwfb/202610/t20261029_1408449_ext.html',timeout:3000},function (officialErr,officialRes,officialHtml) {
+          var officialText=officialHtml && officialHtml.replace(/<[^>]*>/g,'').replace(/\s+/g,'');
+          var confirmed=officialText && officialText.match(/自10月29日24时起[\s\S]{0,220}?调控后实际上调(\d{2,4})元、(\d{2,4})元/);
+          if (!officialErr && officialRes && Number(officialRes.status || officialRes.statusCode)===200 && confirmed && Number(confirmed[1])===345 && Number(confirmed[2])===335) {
+            data.official=true;
+            data.ton=Number(confirmed[1]);
+            return fetchEstimate();
+          }
+          // 今日正式公告访问失败也不退回旧媒体预测，以免展示过时的每升涨幅。
+          done(null);
+        });
+      } else if (forecast) fetchMediaRange(); else done(null);
+      // 同一轮历史新闻的 345 元/吨估算仅作预计升价，非官方分油号定价。
+      function fetchEstimate() {
+        $httpClient.get({url:'https://view.inews.qq.com/k/20261026A0BD2E00?scene=wap&no-redirect=1',timeout:3000},function (estimateErr,estimateRes,estimateHtml) {
+          var text=estimateHtml && estimateHtml.replace(/<[^>]*>/g,'').replace(/\s+/g,'');
+          var match=text && text.match(/10月29日（本周四）24时进行[\s\S]{0,250}?预计上调汽柴油(\d{2,4})元\/吨[\s\S]{0,50}?(0\.\d{2})元\/升[—~～-](0\.\d{2})元\/升/);
+          if (!estimateErr && estimateRes && Number(estimateRes.status || estimateRes.statusCode)===200 && match && Number(match[1])===data.ton && Number(match[2])>0 && Number(match[3])>=Number(match[2]) && Number(match[3])<2) data.range=[Number(match[2]),Number(match[3])];
+          done(data);
+        });
+      }
+      // 未有官方确认时，升价采用同日媒体范围，不把标准品吨价换算成升价。
+      function fetchMediaRange() {
       $httpClient.get({url:'https://m.sohu.com/a/1093928064_121455647',timeout:3000},function (err2,res2,html2) {
         if (!err2 && res2 && Number(res2.status || res2.statusCode)===200 && html2) {
           var day=html2.match(/property="og:release_date" content="(20\d{2}-\d{2}-\d{2})/);
@@ -45,6 +70,7 @@
         }
         done(data);
       });
+      }
     });
   }
   function pad(v) {return ('0'+Number(v)).slice(-2);}
@@ -66,7 +92,7 @@
       var value=range?(Number(item[1])+range[0]).toFixed(2)+'～'+(Number(item[1])+range[1]).toFixed(2):'预测暂不可用';
       lines.push(item[0]+'  '+value);
     });
-    lines.push('','预测仅供参考，以正式公告为准');
+    lines.push('',f && f.official ? '升价为媒体估算；官方汽油+'+f.ton+'元/吨' : '预测仅供参考，以正式公告为准');
     if (!province) lines.push('城市来源HTTP｜页面'+result.date);
     return lines;
   }
