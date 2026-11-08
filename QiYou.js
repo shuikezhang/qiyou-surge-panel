@@ -31,44 +31,55 @@
       done(blocked?null:withEstimate(official || prediction));
     }
     $httpClient.get({url:'https://oil.315i.com/chengpy.html',timeout:2500},function (err,res,html) {
-      if (!err && res && Number(res.status || res.statusCode)===200 && html) {
-        var text=plainText(html).replace(/\s+/g,'');
-        var w=text.match(/窗口期[:：](20\d{2})年(\d{1,2})月(\d{1,2})日/);
-        var e=text.match(/据金联创测算[,，]?截至(\d{1,2})月(\d{1,2})日[\s\S]{0,260}?(?:应|分别)?(上调|下调)(\d{2,4})(?:[和、]\d{2,4})?元\/吨/);
-        // 公告栏措辞变动时，独立尝试同页日期/调幅数据表。
-        if (!e) e=text.match(/对应幅度[（(]元\/吨[）)](\d{1,2})月(\d{1,2})日[\s\S]{0,45}?(上调|下调)(\d{2,4})(?:[、和]\d{2,4})?工作日/);
-        if (w && e) {
-          var year=Number(w[1])-(Number(e[1])>Number(w[2])?1:0);
-          var posted=year+'-'+pad(e[1])+'-'+pad(e[2]);
-          if (validWindow(w,posted) && Number(e[4])>=50 && Number(e[4])<=1500) prediction={window:w[1]+'年'+w[2]+'月'+w[3]+'日24时',date:posted,ton:Number(e[4]),direction:e[3]};
+      try {
+        if (!err && res && Number(res.status || res.statusCode)===200 && html) {
+          var text=plainText(html).replace(/\s+/g,'');
+          var w=text.match(/窗口期[:：](20\d{2})年(\d{1,2})月(\d{1,2})日/);
+          var e=text.match(/据金联创测算[,，]?截至(\d{1,2})月(\d{1,2})日[\s\S]{0,260}?(?:应|分别)?(上调|下调)(\d{2,4})(?:[和、]\d{2,4})?元\/吨/);
+          // 公告栏措辞变动时，独立尝试同页日期/调幅数据表。
+          if (!e) e=text.match(/对应幅度[（(]元\/吨[）)](\d{1,2})月(\d{1,2})日[\s\S]{0,45}?(上调|下调)(\d{2,4})(?:[、和]\d{2,4})?工作日/);
+          if (w && e) {
+            var year=Number(w[1])-(Number(e[1])>Number(w[2])?1:0);
+            var posted=year+'-'+pad(e[1])+'-'+pad(e[2]);
+            if (validWindow(w,posted) && Number(e[4])>=50 && Number(e[4])<=1500) prediction={window:w[1]+'年'+w[2]+'月'+w[3]+'日24时',date:posted,ton:Number(e[4]),direction:e[3]};
+          }
         }
-      }
+      } catch (e) {}
       finish();
     });
     $httpClient.get({url:'https://www.ndrc.gov.cn/xwdt/xwfb/',timeout:2500},function (err,res,html) {
-      if (err || !res || Number(res.status || res.statusCode)!==200 || !html) return finish();
-      var articles=/<li\b[^>]*>([\s\S]*?)<\/li>/gi,m,link=null;
-      while ((m=articles.exec(html))!==null) {
-        var item=plainText(m[1]),date=item.match(/(20\d{2})[\/-](\d{1,2})[\/-](\d{1,2})/);
-        var href=m[1].match(/href=["'](\.\/(?:20\d{4})\/t\d{8}_\d+\.html)["']/);
-        if (date && href && date[1]+'-'+pad(date[2])+'-'+pad(date[3])===today && /成品油价格|成品油.*调控/.test(item)) {link=href[1];break;}
-      }
-      if (!link) return finish();
-      $httpClient.get({url:'https://www.ndrc.gov.cn/xwdt/xwfb/'+link.slice(2),timeout:2500},function (aErr,aRes,article) {
-        if (aErr || !aRes || Number(aRes.status || aRes.statusCode)!==200 || !article) {blocked=true;return finish();}
-        var body=plainText(article).replace(/\s+/g,'');
-        var w=today.split('-');
-        var data={window:w[0]+'年'+Number(w[1])+'月'+Number(w[2])+'日24时',date:today,official:true};
-        if (/本次(?:国内成品油|汽、柴油)价格不作调整/.test(body)) {
-          data.ton=0;data.direction='不调整';official=data;return finish();
+      try {
+        if (err || !res || Number(res.status || res.statusCode)!==200 || !html) return finish();
+        var articles=/<li\b[^>]*>([\s\S]*?)<\/li>/gi,m,link=null;
+        while ((m=articles.exec(html))!==null) {
+          var item=plainText(m[1]),date=item.match(/(20\d{2})[\/-](\d{1,2})[\/-](\d{1,2})/);
+          var href=m[1].match(/href=["'](\.\/(?:20\d{4})\/t\d{8}_\d+\.html)["']/);
+          if (date && href && date[1]+'-'+pad(date[2])+'-'+pad(date[3])===today && /成品油价格|成品油.*调控/.test(item)) {link=href[1];break;}
         }
-        // 必须有正文同日生效时间；调整前回顾中的旧调幅不能被误取。
-        var effective=new RegExp('(?:自)?'+Number(w[1])+'月'+Number(w[2])+'日(?:24时起|国内汽)');
-        var actual=body.match(/调控后实际(上调|下调)(\d{2,4})元[、,，](\d{2,4})元/);
-        if (!actual && !/调控后|实际(?:上调|下调)/.test(body)) actual=body.match(/国内汽、柴油[（(]标准品[）)]价格每吨分别(上调|下调)(\d{2,4})元[、,，](\d{2,4})元/);
-        if (!effective.test(body) || !actual || Number(actual[2])<50 || Number(actual[2])>1500 || Number(actual[3])<0 || Number(actual[3])>1500) {blocked=true;return finish();}
-        data.direction=actual[1];data.ton=Number(actual[2]);official=data;finish();
-      });
+        if (!link) return finish();
+        $httpClient.get({url:'https://www.ndrc.gov.cn/xwdt/xwfb/'+link.slice(2),timeout:2500},function (aErr,aRes,article) {
+          try {
+            if (aErr || !aRes || Number(aRes.status || aRes.statusCode)!==200 || !article) {blocked=true;return finish();}
+            var body=plainText(article).replace(/\s+/g,'');
+            var w=today.split('-');
+            var data={window:w[0]+'年'+Number(w[1])+'月'+Number(w[2])+'日24时',date:today,official:true};
+            if (/本次(?:国内成品油|汽、柴油)价格不作调整/.test(body)) {
+              data.ton=0;data.direction='不调整';official=data;return finish();
+            }
+            // 必须有正文同日生效时间；调整前回顾中的旧调幅不能被误取。
+            var effective=new RegExp('(?:自)?'+Number(w[1])+'月'+Number(w[2])+'日(?:24时起|国内汽)');
+            var actual=body.match(/调控后实际(上调|下调)(\d{2,4})元[、,，](\d{2,4})元/);
+            if (!actual && !/调控后|实际(?:上调|下调)/.test(body)) actual=body.match(/国内汽、柴油[（(]标准品[）)]价格每吨分别(上调|下调)(\d{2,4})元[、,，](\d{2,4})元/);
+            if (!effective.test(body) || !actual || Number(actual[2])<50 || Number(actual[2])>1500 || Number(actual[3])<0 || Number(actual[3])>1500) {blocked=true;return finish();}
+            data.direction=actual[1];data.ton=Number(actual[2]);official=data;finish();
+          } catch (e) {
+            blocked=true;
+            finish();
+          }
+        });
+      } catch (e) {
+        finish();
+      }
     });
   }
   function plainText(html) {return String(html).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/g,' ').replace(/\s+/g,' ').trim();}
